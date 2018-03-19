@@ -196,7 +196,7 @@ Run `npm run compile` to check that there aren't any basic scripting errors that
 
 Assuming you haven't funded your account with test ether yet, you will probably get an error like the following:
 
-```
+```text
 > truffle migrate "--network" "rinkeby"
 
 Using network 'rinkeby'.
@@ -211,10 +211,7 @@ If you're following along with this guide, go ahead and [get some Rinkeby test e
 
 If you see something like the following in your terminal:
 
-```
-$ npm run migrate -- --network rinkeby
-
-> @gnosis.pm/olympia-token@1.2.1 migrate /home/alan/src/github.com/cag/olympia-token
+```text
 > truffle migrate "--network" "rinkeby"
 
 Using network 'rinkeby'.
@@ -249,3 +246,135 @@ Saving artifacts...
 then everything went well, and your contracts are now deployed on Rinkeby!
 
 ### Preserving Deployment Information in Published Packages
+
+After running the migration, Truffle places the deployed addresses inside of the build artifacts located in `build/contracts`. These build artifacts are JSON files which, when converted to a plain JS object and passed as an argument to [`truffle-contract`](https://github.com/trufflesuite/truffle-contract), yields a Truffle contract abstraction which may be used in decentralized application clients.
+
+The deployment execution in the last section resulted in a unique set of addresses which must be distributed to clients, so how do we preserve this deployment information? For example, you may have noticed that `BigToken` was deployed onto Rinkeby at the address [`0xff7...`](https://rinkeby.etherscan.io/address/0xff730e9a89f39fe662c63086c986edae696f61b9). You may run `npm run networks` to see a list of the most recent deployment locations:
+
+```text
+> truffle networks
+
+
+Network: rinkeby (id: 4)
+  AddressRegistry: 0xb36e4d8b39c2bf89ba4b76bf2a952656c40fdf1f
+  BigToken: 0xff730e9a89f39fe662c63086c986edae696f61b9
+  Math: 0x42384e04beb1d2946c416f96bbd2e9f4fb4684b2
+  Migrations: 0x4822ea9c767071bab1f89cbeaf82d667d6bbc0c4
+```
+
+You may also verify that the `networks` key in the build artifacts contains (and in fact is the source of) this information. In fact, if Rinkeby is the only network displayed as a result of your running the migration, you're ready to publish your contract deployment information. However, for the sake of completeness, let's migrate the contracts onto a different chain.
+
+In a different terminal tab, run `./node_modules/.bin/ganache-cli` (or `ganache-cli` if you have it globally, `testrpc`, or full [`ganache`](http://truffleframework.com/ganache/) would probably work too). Then, switch back and run `npm run migrate`. Note that this runs on the default chain, which is just whatever is on `localhost:8545`. After the migration completes, check `npm run networks` again:
+
+```text
+> truffle networks
+
+
+The following networks are configured to match any network id ('*'):
+
+    development
+
+Closely inspect the deployed networks below, and use `truffle networks --clean` to remove any networks that don't match your configuration. You should not use the wildcard configuration ('*') for staging and production networks for which you intend to deploy your application.
+
+Network: UNKNOWN (id: 1521428953603)
+  AddressRegistry: 0xf25881f8491edc65b276d0584d34a28574fe0873
+  BigToken: 0x8da9a75d1ff8bcd3940579e5aed39825967ab0ff
+  Math: 0xd87d9ae40266066934e136036869512e393a507b
+  Migrations: 0xbcc888cd0ec7ce6947e13d6a587090580186de5c
+
+Network: rinkeby (id: 4)
+  AddressRegistry: 0xb36e4d8b39c2bf89ba4b76bf2a952656c40fdf1f
+  BigToken: 0xff730e9a89f39fe662c63086c986edae696f61b9
+  Math: 0x42384e04beb1d2946c416f96bbd2e9f4fb4684b2
+  Migrations: 0x4822ea9c767071bab1f89cbeaf82d667d6bbc0c4
+```
+
+Your build artifacts have grown to contain deployment info for the migration done against the test chain. Of course, in the context of package publication, this is unnecessary bloat. In order to follow the advice displayed, we can use `npm run networks -- --clean`. The extra `--` allows us to pass the `--clean` option down to the underlying `truffle networks` call.
+
+After running the networks script with the clean option, `npm run networks` reports that we only have Rinkeby information in the build artifacts again.
+
+You may notice that the `build` folder is also ignored by Git since it is listed in the `.gitignore` file. However, this folder is *not* ignored by NPM because of an `.npmignore` file which does not list the `build` folder. This means that distributions of this repo on NPM will also contain the `build` folder, but the `build` folder will not be checked into source control.
+
+However, while compilation results may not belong in source control, this information about deployment addresses *should* be checked in. In order to achieve this, we can use a script included with `olympia-token` to extract this information from the build artifacts into a file which sits outside of the Git ignore list:
+
+```sh
+npm run extractnetinfo
+```
+
+Running this command will create or overwrite `networks.json` with all of the network information contained in the build artifacts. This is the file which should be checked into version control. Once we have this, build artifacts containing the deployment information for the Rinkeby network can be restored from plain build artifacts:
+
+```sh
+npm run injectnetinfo
+```
+
+Furthermore, if there are future deployments which clutter or overwrite existing deployment information, the build artifacts can still be reset to this point:
+
+```sh
+npm run resetnetinfo
+```
+
+Note that `resetnetinfo` is invoked as part of `prepublishOnly` to ensure that build artifacts published on NPM contain just the deployment information required for dapp clients.
+
+### Tying a Bow and Shipping It
+
+First, let's make sure that the package is, well, a complete package. Open up a Node shell and try to import this package by `require`-ing the directory:
+
+```sh
+$ node
+> require('.')
+Error: Cannot find module './build/contracts/OlympiaToken.json'
+    at Function.Module._resolveFilename (module.js:555:15)
+    at Function.Module._load (module.js:482:25)
+    at Module.require (module.js:604:17)
+    at require (internal/module.js:11:18)
+    at module.exports.reduce (/path/to/olympia-token/index.js:6:28)
+    at Array.reduce (<anonymous>)
+> 
+```
+
+You may get an error as shown above if you renamed `OlympiaToken`. Note that `package.json` refers the `index.js` file as the `main` entry point for this package, which is why the file showed up in the stack trace. It seems that the source file expects to find the `OlympiaToken.json` build artifact, but since `OlympiaToken` was renamed to `BigToken`, it really should be trying to grab `BigToken.json`. Let's change `index.js` to do that now:
+
+```js
+module.exports = [
+    'AddressRegistry',
+    'BigToken',
+    'PlayToken',
+    'RewardClaimHandler'
+].reduce((o, n) => (o[n] = require(`./build/contracts/${ n }.json`), o), {})
+```
+
+With that out of the way (or if you left things named the way they were), you should see something like the following:
+
+```sh
+$ node
+> require('.')
+{ AddressRegistry: 
+   { contract_name: 'AddressRegistry',
+     abi: [ [Object], [Object], [Object] ],
+     unlinked_binary: '0x6060...',
+     ...,
+   }, ... }
+```
+
+Basically, what you get from importing the package is an object containing build artifacts for the four contracts listed in `index.js`. Those build artifacts may be, for example, used with `truffle-contract` to furnish a client with the ability to interact with the contracts you've deployed onto the blockchain.
+
+Go ahead, edit the `package.json` to your liking, give it a test spin with `npm i`, and then ship it:
+
+```text
+$ npm publish
+
+> big-token@1.2.1 prepublishOnly .
+> truffle compile && truffle networks --clean && node scripts/inject_network_info.js
+
++ big-token@1.2.1
+```
+
+(By the way, `big-token` is taken, so find your own name ;)
+
+## GnosisDB
+
+WIP
+
+## Setting Up the Interface
+
+WIP
