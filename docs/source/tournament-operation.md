@@ -1,18 +1,20 @@
 # Tournament Operation
 
-Towards the end of 2017, Gnosis hosted a prediction market tournament called [Olympia](https://blog.gnosis.pm/announcing-gnosis-olympia-5fb7e16dd259). It combined [GnosisDB](https://github.com/gnosis/gnosisdb), the [core smart contracts](https://github.com/gnosis/gnosis-contracts), and this library in the context of a [user interface](https://github.com/gnosis/gnosis-management) we've been developing (we've also created a [separate repository](https://github.com/gnosis/olympia-interface) for the interface used in the original tournament run, but the work done there is slated to be refactored into a feature flag for the generic interface).
+Towards the end of 2017, Gnosis hosted a prediction market tournament called [Olympia](https://blog.gnosis.pm/announcing-gnosis-olympia-5fb7e16dd259). It combined [GnosisDB](https://github.com/gnosis/gnosisdb), the [core smart contracts](https://github.com/gnosis/gnosis-contracts), and the Gnosis JS library in the context of a [user interface](https://github.com/gnosis/gnosis-management) we've been developing (we've also created a [separate repository](https://github.com/gnosis/olympia-interface) for the interface used in the original tournament run, but the work done there is slated to be refactored into a feature flag for the generic interface).
 
-This tutorial will detail the configuration and operation of such a tournament.
+This tutorial will detail the configuration and operation of such a tournament. In addition to the requirements listed in the introduction of the developer guide, you will also probably want to use [Git](https://git-scm.com/), and you will need to have [Docker](https://docs.docker.com/install/) and [Docker Compose](https://docs.docker.com/compose/install/) installed for [GnosisDB](https://github.com/gnosis/gnosisdb).
 
 ## Smart Contracts
 
-First, you will want to deploy contracts necessary for the tournament. These contracts can be found in the [`olympia-token`](https://github.com/gnosis/olympia-token) repository. It will likely be the case that you will want to fork this repository in order to tweak it for your own purposes (you will know if that is not the case), so hit that fork button. After forking it, clone your fork and open the folder in a terminal:
+First, you will want to deploy contracts necessary for the tournament. These contracts can be found in the [`olympia-token`](https://github.com/gnosis/olympia-token) repository. It will likely be the case that you will want to fork this repository in order to tweak it for your own purposes, so hit that fork button. After forking it, clone your fork and open the folder in a terminal:
 
 ```sh
 # this is the SSH version; feel free to use HTTPS if you prefer
 git clone git@github.com:your-github-handle/olympia-token.git
 cd olympia-token
 ```
+
+You may choose instead to not fork the directory and just clone the original repo, or to forgo Git and just download the repository as a ZIP or tarball; the rest of this guide should still work regardless.
 
 Have NPM install the dependencies for the repository:
 
@@ -343,7 +345,7 @@ module.exports = [
 ].reduce((o, n) => (o[n] = require(`./build/contracts/${ n }.json`), o), {})
 ```
 
-With that out of the way (or if you left things named the way they were), you should see something like the following:
+With that out of the way (or if you originally left things named the way they were), you should see something like the following:
 
 ```sh
 $ node
@@ -373,7 +375,60 @@ $ npm publish
 
 ## GnosisDB
 
-WIP
+Ethereum blockchain providers expose a common interface for querying, but to query blockchain providers directly for tournament-related info would be much too slow. That's why we've developed [GnosisDB](https://github.com/gnosis/gnosisdb), which syncs up with and queries a blockchain provider directly, filtering related data into an indexed database which provides great boosts in speed when querying the database.
+
+Let's follow along with the GnosisDB setup instructions. First, ensure that [Docker](https://docs.docker.com/install/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed.
+
+Then, make sure you're not inside of a repository directory, clone GnosisDB, and `cd` into the newly cloned repo:
+
+```sh
+cd .. # assuming you're still in the olympia-token directory you created previously
+git clone git@github.com:gnosis/gnosisdb.git
+cd gnosisdb
+```
+
+Then, have Docker build the container images.
+
+```sh
+docker-compose build --force-rm
+```
+
+You may see the following error:
+
+```text
+$ docker-compose build --force-rm
+Building ipfs
+ERROR: Couldn't connect to Docker daemon at http+docker://localunixsocket - is it running?
+
+If it's at a non-standard location, specify the URL with the DOCKER_HOST environment variable.
+```
+
+If so, it may be that your current user does not have permission to connect to the Docker daemon. If that's the case, consider [this answer](https://askubuntu.com/questions/477551/how-can-i-use-docker-without-sudo#477554), or run `docker-compose` with `sudo`.
+
+If the build succeeds, we next want to configure the web container instance by adding a superuser so that we have admin access to the database:
+
+```sh
+docker-compose run web bash
+```
+
+This makes us the root user of a shell inside of the web container:
+
+```text
+root@e7f35cc2dc18:/gnosisdb# 
+```
+
+Using that shell, we migrate the database schema and create a superuser:
+
+```sh
+python manage.py migrate
+python manage.py createsuperuser
+```
+
+Now, `exit` the web container shell and spin up all the GnosisDB Docker images:
+
+```sh
+docker-compose up
+```
 
 ## Setting Up the Interface
 
